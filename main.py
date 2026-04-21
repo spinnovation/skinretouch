@@ -179,10 +179,6 @@ def process_image(img_path, output_path):
         final_image = (image.astype(np.float32) * (1.0 - skin_mask_3d)) + (smoothed_img.astype(np.float32) * skin_mask_3d)
         final_image = np.clip(final_image, 0, 255).astype(np.uint8)
 
-        # 사용자가 어디를 힐링(Inpainting) 했는지 볼 수 있도록 인페인팅 영역을 붉은색으로 칠하기
-        if cv2.countNonZero(blemish_mask) > 0:
-            final_image[blemish_mask > 0] = [0, 0, 255]
-
     cv2.imwrite(output_path, final_image)
     print(f"[*] 처리 완료! 다음 경로에 저장되었습니다: '{output_path}'")
     return True
