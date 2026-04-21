@@ -66,7 +66,7 @@ def remove_blemishes(img, skin_mask):
         # 감지된 잡티 부분을 주변 피부 픽셀로 감쪽같이 채워넣기(Inpainting)
         healed_img = cv2.inpaint(img, blemish_mask, 2, cv2.INPAINT_TELEA)
         
-    return healed_img
+    return healed_img, blemish_mask
 
 def correct_skin_tone(img, skin_mask):
     """
@@ -147,7 +147,7 @@ def process_image(img_path, output_path):
 
         # 1. 자연스러운 잡티 및 붉은기 교정 (수염 자국과 기미 보존형)
         print("[+] 붉은기 및 국소 잡티를 부드럽게 지우는 중입니다...")
-        healed_image = remove_blemishes(image.copy(), global_skin_mask)
+        healed_image, blemish_mask = remove_blemishes(image.copy(), global_skin_mask)
         
         # 2. 피부 톤 및 입체감 교정
         print("[+] 피부 톤과 빛, 그림자의 입체감을 강화하는 중입니다...")
@@ -163,6 +163,10 @@ def process_image(img_path, output_path):
         
         final_image = (image.astype(np.float32) * (1.0 - skin_mask_3d)) + (smoothed_img.astype(np.float32) * skin_mask_3d)
         final_image = np.clip(final_image, 0, 255).astype(np.uint8)
+
+        # 사용자가 어디를 힐링(Inpainting) 했는지 볼 수 있도록 인페인팅 영역을 붉은색으로 칠하기
+        if cv2.countNonZero(blemish_mask) > 0:
+            final_image[blemish_mask > 0] = [0, 0, 255]
 
     cv2.imwrite(output_path, final_image)
     print(f"[*] 처리 완료! 다음 경로에 저장되었습니다: '{output_path}'")
