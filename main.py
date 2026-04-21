@@ -41,15 +41,15 @@ def remove_blemishes(img, skin_mask):
     l_channel, a, b = cv2.split(lab)
     
     # 1. 어두운 점 (잡티/주근깨) 잡기: 블랙햇 (Black-Hat) 변환 활용
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (100, 100))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
     # 피부 잡티와 점을 정확하게 포착하기 위해 임곗값을 조정
     _, blemish_mask_dark = cv2.threshold(blackhat, 1, 255, cv2.THRESH_BINARY)
 
     # 2. 붉은 점 (여드름/홍조) 잡기: A-채널의 부분적 대비(Contrast) 활용
-    a_blur = cv2.GaussianBlur(a, (100, 100), 0)
+    a_blur = cv2.GaussianBlur(a, (21, 21), 0)
     red_spikes = cv2.subtract(a, a_blur)
-    _, blemish_mask_red = cv2.threshold(red_spikes, 10, 255, cv2.THRESH_BINARY)
+    _, blemish_mask_red = cv2.threshold(red_spikes, 5, 255, cv2.THRESH_BINARY)
     
     # 잡티 마스크 병합
     blemish_mask = cv2.bitwise_or(blemish_mask_dark, blemish_mask_red)
