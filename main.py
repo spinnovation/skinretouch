@@ -35,35 +35,53 @@ def smooth_skin(roi, p=50, value1=3, value2=1):
 
 def remove_blemishes(img, skin_mask):
     """
-    Remove moles, acne, and spots using Morphology and Inpainting inside the skin mask.
+    Subtle removal of severe redness/blemishes while preserving natural moles and stubble.
     """
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l_channel, a, b = cv2.split(lab)
     
-    # 1. Dark spots (moles/freckles) via Black-Hat transform
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
-    _, blemish_mask_dark = cv2.threshold(blackhat, 10, 255, cv2.THRESH_BINARY)
-    
-    # 2. Red spots (acne) via A-channel local contrast
-    a_blur = cv2.GaussianBlur(a, (15, 15), 0)
+    # Red spots (acne/redness) via A-channel local contrast
+    a_blur = cv2.GaussianBlur(a, (21, 21), 0)
     red_spikes = cv2.subtract(a, a_blur)
-    _, blemish_mask_red = cv2.threshold(red_spikes, 10, 255, cv2.THRESH_BINARY)
     
-    # 3. Combine and restrict
-    blemish_mask = cv2.bitwise_or(blemish_mask_dark, blemish_mask_red)
-    blemish_mask = cv2.bitwise_and(blemish_mask, skin_mask)
+    # Higher threshold to ONLY catch severe blemishes and redness, keeping minor details intact
+    _, blemish_mask_red = cv2.threshold(red_spikes, 15, 255, cv2.THRESH_BINARY)
     
-    # 4. Cleanup and dilate mask to ensure full coverage of the spot
+    # We DO NOT use black-hat here to actively preserve small moles, stubble, and fine lines.
+    blemish_mask = cv2.bitwise_and(blemish_mask_red, skin_mask)
+    
+    # Cleanup mask
     tiny_kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
     dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    
     blemish_mask = cv2.erode(blemish_mask, tiny_kernel, iterations=1)
     blemish_mask = cv2.dilate(blemish_mask, dilate_kernel, iterations=2)
     
+    healed_img = img.copy()
     if cv2.countNonZero(blemish_mask) > 0:
-        return cv2.inpaint(img, blemish_mask, 3, cv2.INPAINT_TELEA)
-    return img
+        healed_img = cv2.inpaint(img, blemish_mask, 3, cv2.INPAINT_TELEA)
+        
+    return healed_img
+
+def correct_skin_tone(img, skin_mask):
+    """
+    Subtle correction of dull skin tone and enhancing natural light and shadow dimensionality.
+    """
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, a, b = cv2.split(lab)
+    
+    # Apply CLAHE to Lightness channel for better light and shadow dimensionality
+    clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8,8))
+    l_clahe = clahe.apply(l_channel)
+    
+    # Merge back
+    enhanced_lab = cv2.merge((l_clahe, a, b))
+    enhanced_img = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+    
+    # subtly blend enhanced tone only on the skin (20% opacity for natural look)
+    mask_3d = cv2.cvtColor(skin_mask, cv2.COLOR_GRAY2BGR).astype(np.float32) / 255.0
+    final_img = (img.astype(np.float32) * (1.0 - (mask_3d * 0.2))) + (enhanced_img.astype(np.float32) * (mask_3d * 0.2))
+    
+    return np.clip(final_img, 0, 255).astype(np.uint8)
 
 def process_image(img_path, output_path):
     print(f"[*] Processing {img_path} ...")
@@ -95,7 +113,7 @@ def process_image(img_path, output_path):
 
     if not detection_result.face_landmarks:
         print("[-] No face detected. Applying global smoothing...")
-        final_image = smooth_skin(image.copy(), p=50)
+        final_image = smooth_skin(image.copy(), p=30)
     else:
         print(f"[+] Detected {len(detection_result.face_landmarks)} face(s). Generating precision masks...")
         
@@ -121,17 +139,20 @@ def process_image(img_path, output_path):
             
             global_skin_mask = cv2.add(global_skin_mask, face_mask)
 
-        # 1. Blemish Removal
-        print("[+] Erasing moles, spots, and acne via Auto-Inpainting...")
+        # 1. Subtle Blemish/Redness Correction (Preserving moles and stubble)
+        print("[+] Subtle correction of redness and blemishes...")
         healed_image = remove_blemishes(image.copy(), global_skin_mask)
-
-        # 2. Apply the smoothing logic on the healed image
-        print("[+] Applying Frequency-Separation Skin Smoothing...")
-        smoothed_img = smooth_skin(healed_image, p=60)
         
-        # 3. Merge the smoothed image and the original image based on the skin mask
-        # Note: We merge with `healed_image` as the base so that blemishes remain gone, 
-        # but the non-skin parts revert to original unaltered pixels!
+        # 2. Tone/Dimensionality Correction
+        print("[+] Enhancing tone, light, and shadow dimensionality...")
+        toned_image = correct_skin_tone(healed_image, global_skin_mask)
+
+        # 3. Apply High-Resolution Natural Skin Smoothing
+        # Lowering parameter value1 to 2 to narrow blur radius, keeping pores crisp.
+        print("[+] Applying Natural Frequency-Separation Skin Balancing...")
+        smoothed_img = smooth_skin(toned_image, p=35, value1=2) 
+        
+        # 4. Merge the optimally tuned image with the original utilizing the exact mask
         skin_mask_3d = cv2.cvtColor(global_skin_mask, cv2.COLOR_GRAY2BGR).astype(np.float32) / 255.0
         
         final_image = (image.astype(np.float32) * (1.0 - skin_mask_3d)) + (smoothed_img.astype(np.float32) * skin_mask_3d)
