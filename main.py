@@ -33,6 +33,38 @@ def smooth_skin(roi, p=50, value1=3, value2=1):
     
     return dst
 
+def remove_blemishes(img, skin_mask):
+    """
+    Remove moles, acne, and spots using Morphology and Inpainting inside the skin mask.
+    """
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, a, b = cv2.split(lab)
+    
+    # 1. Dark spots (moles/freckles) via Black-Hat transform
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
+    _, blemish_mask_dark = cv2.threshold(blackhat, 10, 255, cv2.THRESH_BINARY)
+    
+    # 2. Red spots (acne) via A-channel local contrast
+    a_blur = cv2.GaussianBlur(a, (15, 15), 0)
+    red_spikes = cv2.subtract(a, a_blur)
+    _, blemish_mask_red = cv2.threshold(red_spikes, 10, 255, cv2.THRESH_BINARY)
+    
+    # 3. Combine and restrict
+    blemish_mask = cv2.bitwise_or(blemish_mask_dark, blemish_mask_red)
+    blemish_mask = cv2.bitwise_and(blemish_mask, skin_mask)
+    
+    # 4. Cleanup and dilate mask to ensure full coverage of the spot
+    tiny_kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    
+    blemish_mask = cv2.erode(blemish_mask, tiny_kernel, iterations=1)
+    blemish_mask = cv2.dilate(blemish_mask, dilate_kernel, iterations=2)
+    
+    if cv2.countNonZero(blemish_mask) > 0:
+        return cv2.inpaint(img, blemish_mask, 3, cv2.INPAINT_TELEA)
+    return img
+
 def process_image(img_path, output_path):
     print(f"[*] Processing {img_path} ...")
     image = cv2.imread(img_path)
@@ -89,10 +121,17 @@ def process_image(img_path, output_path):
             
             global_skin_mask = cv2.add(global_skin_mask, face_mask)
 
-        # Apply the smoothing logic on the whole image
-        smoothed_img = smooth_skin(image.copy(), p=60)
+        # 1. Blemish Removal
+        print("[+] Erasing moles, spots, and acne via Auto-Inpainting...")
+        healed_image = remove_blemishes(image.copy(), global_skin_mask)
+
+        # 2. Apply the smoothing logic on the healed image
+        print("[+] Applying Frequency-Separation Skin Smoothing...")
+        smoothed_img = smooth_skin(healed_image, p=60)
         
-        # Merge the smoothed image and the original image based on the skin mask
+        # 3. Merge the smoothed image and the original image based on the skin mask
+        # Note: We merge with `healed_image` as the base so that blemishes remain gone, 
+        # but the non-skin parts revert to original unaltered pixels!
         skin_mask_3d = cv2.cvtColor(global_skin_mask, cv2.COLOR_GRAY2BGR).astype(np.float32) / 255.0
         
         final_image = (image.astype(np.float32) * (1.0 - skin_mask_3d)) + (smoothed_img.astype(np.float32) * skin_mask_3d)
