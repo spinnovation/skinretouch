@@ -41,13 +41,13 @@ def remove_blemishes(img, skin_mask):
     l_channel, a, b = cv2.split(lab)
     
     # 1. 어두운 점 (잡티/주근깨) 잡기: 블랙햇 (Black-Hat) 변환 활용
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (100, 100))
     blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
     # 피부 잡티와 점을 정확하게 포착하기 위해 임곗값을 조정
-    _, blemish_mask_dark = cv2.threshold(blackhat, 20, 255, cv2.THRESH_BINARY)
+    _, blemish_mask_dark = cv2.threshold(blackhat, 1, 255, cv2.THRESH_BINARY)
 
     # 2. 붉은 점 (여드름/홍조) 잡기: A-채널의 부분적 대비(Contrast) 활용
-    a_blur = cv2.GaussianBlur(a, (21, 21), 0)
+    a_blur = cv2.GaussianBlur(a, (100, 100), 0)
     red_spikes = cv2.subtract(a, a_blur)
     _, blemish_mask_red = cv2.threshold(red_spikes, 10, 255, cv2.THRESH_BINARY)
     
@@ -64,7 +64,7 @@ def remove_blemishes(img, skin_mask):
     healed_img = img.copy()
     if cv2.countNonZero(blemish_mask) > 0:
         # 감지된 잡티 부분을 주변 피부 픽셀로 감쪽같이 채워넣기(Inpainting)
-        healed_img = cv2.inpaint(img, blemish_mask, 2, cv2.INPAINT_TELEA)
+        healed_img = cv2.inpaint(img, blemish_mask, 10, cv2.INPAINT_TELEA)
         
     return healed_img, blemish_mask
 
@@ -85,7 +85,7 @@ def correct_skin_tone(img, skin_mask):
     
     # 피부 부분에만 강화된 톤을 부드럽게 합성 (자연스러움을 위해 20% 불투명도 적용)
     mask_3d = cv2.cvtColor(skin_mask, cv2.COLOR_GRAY2BGR).astype(np.float32) / 255.0
-    final_img = (img.astype(np.float32) * (1.0 - (mask_3d * 0.2))) + (enhanced_img.astype(np.float32) * (mask_3d * 0.2))
+    final_img = (img.astype(np.float32) * (1.0 - (mask_3d * 0.5))) + (enhanced_img.astype(np.float32) * (mask_3d * 0.2))
     
     return np.clip(final_img, 0, 255).astype(np.uint8)
 
@@ -139,6 +139,21 @@ def process_image(img_path, output_path):
             hull = cv2.convexHull(points)
             face_mask = np.zeros(image.shape[:2], dtype=np.uint8)
             cv2.fillConvexPoly(face_mask, hull, 255)
+
+            # --- 이목구비(눈, 눈썹, 입술) 보호를 위해 마스크에서 제외 ---
+            LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+            RIGHT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+            LIPS = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40]
+            LEFT_EYEBROW = [46, 53, 52, 65, 55, 70, 63, 105, 66, 107]
+            RIGHT_EYEBROW = [285, 295, 282, 283, 276, 300, 293, 334, 296, 336]
+            
+            features_to_exclude = [LEFT_EYE, RIGHT_EYE, LIPS, LEFT_EYEBROW, RIGHT_EYEBROW]
+            for feature_indices in features_to_exclude:
+                feature_points = [points[idx] for idx in feature_indices]
+                feature_polygon = np.array(feature_points, dtype=np.int32)
+                # 약간 여유를 두어 이목구비 외곽까지 안전하게 보호하기 위해 볼록 다각형으로 구멍 뚫기
+                feature_hull = cv2.convexHull(feature_polygon)
+                cv2.fillConvexPoly(face_mask, feature_hull, 0)
             
             # 윤곽선이 자연스럽게 블렌딩 되도록 마스크 가장자리에 가우시안 블러 적용
             face_mask = cv2.GaussianBlur(face_mask, (15, 15), 0)
