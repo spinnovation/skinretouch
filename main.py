@@ -35,24 +35,29 @@ def smooth_skin(roi, p=50, value1=3, value2=1):
 
 def remove_blemishes(img, skin_mask):
     """
-    Subtle removal of severe redness/blemishes while preserving natural moles and stubble.
+    Removal of blemishes, redness, and spots, while utilizing frequency separation to keep pores later.
     """
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l_channel, a, b = cv2.split(lab)
     
-    # Red spots (acne/redness) via A-channel local contrast
+    # 1. Dark spots (blemishes/freckles) via Black-Hat transform
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
+    # Lower threshold to properly catch and erase skin blemishes and spots
+    _, blemish_mask_dark = cv2.threshold(blackhat, 10, 255, cv2.THRESH_BINARY)
+
+    # 2. Red spots (acne/redness) via A-channel local contrast
     a_blur = cv2.GaussianBlur(a, (21, 21), 0)
     red_spikes = cv2.subtract(a, a_blur)
+    _, blemish_mask_red = cv2.threshold(red_spikes, 10, 255, cv2.THRESH_BINARY)
     
-    # Higher threshold to ONLY catch severe blemishes and redness, keeping minor details intact
-    _, blemish_mask_red = cv2.threshold(red_spikes, 15, 255, cv2.THRESH_BINARY)
-    
-    # We DO NOT use black-hat here to actively preserve small moles, stubble, and fine lines.
-    blemish_mask = cv2.bitwise_and(blemish_mask_red, skin_mask)
+    # Combine masks
+    blemish_mask = cv2.bitwise_or(blemish_mask_dark, blemish_mask_red)
+    blemish_mask = cv2.bitwise_and(blemish_mask, skin_mask)
     
     # Cleanup mask
     tiny_kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
-    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     blemish_mask = cv2.erode(blemish_mask, tiny_kernel, iterations=1)
     blemish_mask = cv2.dilate(blemish_mask, dilate_kernel, iterations=2)
     
@@ -150,7 +155,7 @@ def process_image(img_path, output_path):
         # 3. Apply High-Resolution Natural Skin Smoothing
         # Lowering parameter value1 to 2 to narrow blur radius, keeping pores crisp.
         print("[+] Applying Natural Frequency-Separation Skin Balancing...")
-        smoothed_img = smooth_skin(toned_image, p=35, value1=2) 
+        smoothed_img = smooth_skin(toned_image, p=45, value1=2) 
         
         # 4. Merge the optimally tuned image with the original utilizing the exact mask
         skin_mask_3d = cv2.cvtColor(global_skin_mask, cv2.COLOR_GRAY2BGR).astype(np.float32) / 255.0
