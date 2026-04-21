@@ -44,7 +44,7 @@ def remove_blemishes(img, skin_mask):
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     blackhat = cv2.morphologyEx(l_channel, cv2.MORPH_BLACKHAT, kernel)
     # Lower threshold to properly catch and erase skin blemishes and spots
-    _, blemish_mask_dark = cv2.threshold(blackhat, 10, 255, cv2.THRESH_BINARY)
+    _, blemish_mask_dark = cv2.threshold(blackhat, 20, 255, cv2.THRESH_BINARY)
 
     # 2. Red spots (acne/redness) via A-channel local contrast
     a_blur = cv2.GaussianBlur(a, (21, 21), 0)
@@ -63,7 +63,7 @@ def remove_blemishes(img, skin_mask):
     
     healed_img = img.copy()
     if cv2.countNonZero(blemish_mask) > 0:
-        healed_img = cv2.inpaint(img, blemish_mask, 3, cv2.INPAINT_TELEA)
+        healed_img = cv2.inpaint(img, blemish_mask, 2, cv2.INPAINT_TELEA)
         
     return healed_img
 
